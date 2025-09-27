@@ -162,8 +162,8 @@ button:active{
 }
 
 .arrow-btn {
-    width: 50px;
-    height: 50px;
+    width: 100px;
+    height: 100px;
     border: 2px solid white;
     background: rgba(255, 255, 255, 0.1);
     color: white;
