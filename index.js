@@ -411,7 +411,8 @@ const rocketPhysics = {
     maxRotationSpeed: 0.1, // Maximum rotation speed
     thrust: 0.05, // How strong the boost is
     rotationThrust: 0.01, // How strong the rotation boost is
-    friction: 0.99 // Air resistance (0.98 = 2% speed loss per frame)
+    friction: 0.99, // Air resistance (0.98 = 2% speed loss per frame)
+    rotationFriction: 0.95
 }
 
 // Scene is now empty - ready for your minigame objects
@@ -469,23 +470,20 @@ const tick = () => {
 
     booster.scale.set(0,0,0)
     booster.rotation.set(0, elapsedTime * 2,0)
-    booster.position.set(0, -0.3, 0)
+    keys.space ? booster.position.set(0, 0.1, 0) : booster.position.set(0, -0.3, 0)
+
 
     if (keys.w) {
         // Forward thrust in the direction the rocket is facing
-        rocketPhysics.acceleration.x -= forwardX * rocketPhysics.thrust
-        rocketPhysics.acceleration.y += forwardY * rocketPhysics.thrust
-        const boosterLength =  (rocketPhysics.thrust * 2) +.5
+        rocketPhysics.acceleration.x -= forwardX * rocketPhysics.thrust * (keys.space ? 2 : 1)
+        rocketPhysics.acceleration.y += forwardY * rocketPhysics.thrust * (keys.space ? 2 : 1)
+        const boosterLength =  (rocketPhysics.thrust * 2) +.5 * (keys.space ? 2 : 1)
         booster.scale.set(1, boosterLength + Math.sin(elapsedTime * 18) * .02, 1)
     }
 
     if (keys.a) rocketPhysics.rotationAcceleration.z += rocketPhysics.rotationThrust * .2 // Left rotation
     if (keys.d) rocketPhysics.rotationAcceleration.z -= rocketPhysics.rotationThrust * .2 // Right rotation
-    if (keys.space) {
-        // Boost in forward direction (stronger)
-        rocketPhysics.acceleration.x -= forwardX * rocketPhysics.thrust * 2
-        rocketPhysics.acceleration.y += forwardY * rocketPhysics.thrust * 2
-    }
+ 
     
     // Step 1: Apply acceleration to velocity
     rocketPhysics.velocity.x += rocketPhysics.acceleration.x
@@ -500,9 +498,9 @@ const tick = () => {
     rocketPhysics.velocity.x *= rocketPhysics.friction
     rocketPhysics.velocity.y *= rocketPhysics.friction
     rocketPhysics.velocity.z *= rocketPhysics.friction
-    rocketPhysics.rotationVelocity.z *= rocketPhysics.friction
-    rocketPhysics.rotationVelocity.x *= rocketPhysics.friction
-    rocketPhysics.rotationVelocity.y *= rocketPhysics.friction
+    rocketPhysics.rotationVelocity.z *= rocketPhysics.rotationFriction
+    rocketPhysics.rotationVelocity.x *= rocketPhysics.rotationFriction
+    rocketPhysics.rotationVelocity.y *= rocketPhysics.rotationFriction
     
     // Step 3: Limit maximum speed
     const speed = Math.sqrt(
