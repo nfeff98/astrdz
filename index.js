@@ -1,6 +1,30 @@
 import {OrbitControls} from 'https://unpkg.com/three@0.127.0/examples/jsm/controls/OrbitControls.js'
 import {GLTFLoader} from 'https://unpkg.com/three@0.127.0/examples/jsm/loaders/GLTFLoader.js'
 import * as THREE from 'https://unpkg.com/three@0.127.0/build/three.module.js';
+
+
+import { EffectComposer } from 'https://unpkg.com/three@0.127.0/examples/jsm/postprocessing/EffectComposer.js'
+import { RenderPass } from 'https://unpkg.com/three@0.127.0/examples/jsm/postprocessing/RenderPass.js'
+import { GlitchPass } from 'https://unpkg.com/three@0.127.0/examples/jsm/postprocessing/GlitchPass.js'
+import { UnrealBloomPass } from 'https://unpkg.com/three@0.127.0/examples/jsm/postprocessing/UnrealBloomPass.js'
+import { Pass } from "https://unpkg.com/three@0.127.0/examples/jsm/postprocessing/Pass.js"
+
+import RenderPixelatedPass from "./RenderPixelatedPass.js"
+import PixelatePass from "./PixelatePass.js"
+import BulletHandler from "./bulletHandler.js"
+import AsteroidHandler from "./asteroidHandler.js"
+
+
+// Pixel texture helper function
+function pixelTex(tex) {
+    tex.minFilter = THREE.NearestFilter
+    tex.magFilter = THREE.NearestFilter
+    tex.generateMipmaps = false
+    tex.wrapS = THREE.RepeatWrapping
+    tex.wrapT = THREE.RepeatWrapping
+    return tex
+}
+
 const canvas = document.querySelector('canvas.webgl')
 const starsCanvas = document.querySelector('canvas.stars-canvas')
 
@@ -43,8 +67,8 @@ function renderStars() {
     
     // Get rocket position for parallax effect
     // Stars should move OPPOSITE to rocket movement for parallax
-    const offsetX = rocketPhysics.position.x * 5 // Increased parallax factor
-    const offsetY = -rocketPhysics.position.y * 5
+    const offsetX = rocketPhysics.position.x * 250 // Increased parallax factor
+    const offsetY = -rocketPhysics.position.y * 250
     
 
     // Render each star
@@ -97,15 +121,33 @@ function renderStars() {
 
 // Scene
 const scene = new THREE.Scene()
+// No background set - this makes it transparent
+
+// Initialize bullet handler
+let bulletHandler = null
+
+let asteroidHandler = null
+
+// Pixelated rendering setup
+let screenResolution = new THREE.Vector2(window.innerWidth, window.innerHeight)
+let renderResolution = screenResolution.clone().divideScalar(6) // 1/6th resolution for pixelated effect
+renderResolution.x |= 0
+renderResolution.y |= 0
+
+// Effect Composer for post-processing
+let composer
 
 // Add lighting
 const pointLight = new THREE.PointLight(0xffffff, 1, 50)
 pointLight.position.set(10, 0, 5)
 scene.add(pointLight)
 
-const crossLight = new THREE.PointLight(0xee2222, 1, 15)
+const crossLight = new THREE.PointLight(0x332222, 1, 15)
 crossLight.position.set(5, 0, 2)
 scene.add(crossLight)
+
+// Add ambient light for better visibility
+scene.add(new THREE.AmbientLight(0x2d3645, 1.5))
 
 // Add a visible light helper to see where the light is
 const lightHelper = new THREE.PointLightHelper(pointLight, 1)
@@ -119,7 +161,7 @@ scene.add(lightHelper)
 
 
 const textureLoader = new THREE.TextureLoader()
-const myTexture = textureLoader.load('coolTex.jpg')
+const myTexture = pixelTex(textureLoader.load('coolTex.jpg'))
 
 // Get boost button (the one that's not an arrow button)
 const buttonBoost = document.querySelector('.corner-text.bottom-right button')
@@ -138,8 +180,27 @@ const keys = {
     s: false, // Backward
     a: false, // Left
     d: false, // Right
-    space: false // Boost
+    space: false, // Boost
+    mouseRight: false, // Right mouse button
+    mouseLeft: false, // Left mouse button
 }
+
+document.addEventListener('mousedown', (event) => {
+    if (event.button === 2) {
+        keys.mouseRight = true;
+    } else if (event.button === 0) {
+        keys.mouseLeft = true;
+        // Shoot bullet on left mouse click
+        if (bulletHandler) {
+            console.log("Shooting bullet")
+            bulletHandler.shootFromRocket(
+                new THREE.Vector3(rocketPhysics.position.x, rocketPhysics.position.y, rocketPhysics.position.z),
+                -rocketPhysics.rotation.z,
+                new THREE.Vector3(rocketPhysics.velocity.x, rocketPhysics.velocity.y, rocketPhysics.velocity.z)
+            )
+        }
+    }
+})
 
 // Track which keys are pressed
 document.addEventListener('keydown', (event) => {
@@ -299,7 +360,7 @@ gltfLoader.load(
                         //console.log('Single material:', child.material.type, child.material.name)
                         if (child.material.name.includes("white")) {    
                         child.material = new THREE.MeshLambertMaterial({ 
-                            color: 0x333333,
+                            color: 0xf2f2f2,
                             transparent: false,
                             opacity: 1,
                         })
@@ -326,7 +387,7 @@ gltfLoader.load(
         })
         
         // Scale the model if needed (adjust these values based on your model)
-        rocket.scale.set(.1, .1, .1)
+        rocket.scale.set(.15, .15, .15)
         
         // Position the rocket
         rocket.position.set(0, 0, 0)
@@ -407,9 +468,9 @@ const rocketPhysics = {
     
     // Physics properties
     mass: 10, // High mass = high inertia (harder to move)
-    maxSpeed: 20, // Maximum speed limit
+    maxSpeed: .1, // Maximum speed limit
     maxRotationSpeed: 0.1, // Maximum rotation speed
-    thrust: 0.05, // How strong the boost is
+    thrust: 0.001, // How strong the boost is
     rotationThrust: 0.01, // How strong the rotation boost is
     friction: 0.99, // Air resistance (0.98 = 2% speed loss per frame)
     rotationFriction: 0.95
@@ -433,12 +494,26 @@ window.addEventListener('resize',()=>{
     renderer.setSize(sizes.width,sizes.height)
     renderer.setPixelRatio(Math.min(window.devicePixelRatio,2))
     
+    // Update pixelated rendering resolution
+    screenResolution.set(window.innerWidth, window.innerHeight)
+    renderResolution.copy(screenResolution).divideScalar(6)
+    renderResolution.x |= 0
+    renderResolution.y |= 0
+    
+    // Update composer size
+    if (composer) {
+        composer.setSize(sizes.width, sizes.height)
+    }
 })
 
 // Camera
 const camera = new THREE.PerspectiveCamera(75,sizes.width/sizes.height,0.1,100)
 camera.position.z = 3
 scene.add(camera)
+
+// Initialize bullet handler after camera is created
+bulletHandler = new BulletHandler(scene, camera)
+asteroidHandler = new AsteroidHandler(scene, camera)
 
 // Controls
 const controls = new OrbitControls(camera, canvas)
@@ -451,10 +526,22 @@ controls.enabled = false // Completely disable controls to avoid interference
 
 const renderer = new THREE.WebGLRenderer({
     canvas: canvas,
-    alpha: true,
+    alpha: true, // Enable transparency
+    antialias: false // Disable antialiasing for pixelated look
 })
-renderer.setSize(sizes.width,sizes.height)
-renderer.setPixelRatio(Math.min(window.devicePixelRatio,2))
+   
+renderer.setSize(sizes.width, sizes.height)
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+renderer.shadowMap.enabled = true
+
+// Initialize Effect Composer with pixelated rendering
+composer = new EffectComposer(renderer)
+composer.addPass(new RenderPixelatedPass(renderResolution, scene, camera))
+let bloomPass = new UnrealBloomPass(screenResolution, 0.4, 0.1, 0.9)
+//composer.addPass(bloomPass)
+let pixelatePass = new PixelatePass(renderResolution)
+pixelatePass.renderToScreen = true // Make sure final pass renders to screen
+composer.addPass(pixelatePass)
 
 const clock = new THREE.Clock()
 
@@ -483,7 +570,11 @@ const tick = () => {
 
     if (keys.a) rocketPhysics.rotationAcceleration.z += rocketPhysics.rotationThrust * .2 // Left rotation
     if (keys.d) rocketPhysics.rotationAcceleration.z -= rocketPhysics.rotationThrust * .2 // Right rotation
- 
+
+  
+    if (keys.mouseLeft){
+        // Bullet shooting is handled in mousedown event
+    }
     
     // Step 1: Apply acceleration to velocity
     rocketPhysics.velocity.x += rocketPhysics.acceleration.x
@@ -553,9 +644,20 @@ const tick = () => {
     rocketPhysics.rotationAcceleration.y = 0
     rocketPhysics.rotationAcceleration.z = 0
 
+    // Update bullets
+    if (bulletHandler) {
+        bulletHandler.updateBullets()
+    }
+
+    // Update asteroids
+    if (asteroidHandler) {
+        const bullets = bulletHandler.getBullets()
+        asteroidHandler.updateAsteroids(bullets, bulletHandler, rocketPhysics.position)
+    }
+
     // Camera dead zone system (like Asteroids)
-    const deadZoneRadius = .01 // Radius where ship can move without moving camera
-    const cameraLerpSpeed = .9// How fast camera catches up
+    const deadZoneRadius = 0 // Radius where ship can move without moving camera
+    const cameraLerpSpeed = 0.1// How fast camera catches up
     
     // Calculate distance from camera to rocket (XY only)
     const cameraToRocketX = rocketPhysics.position.x - camera.position.x
@@ -602,12 +704,15 @@ const tick = () => {
     
     coords.textContent = `X: ${rocketPhysics.position.x.toFixed(2)}, Y: ${rocketPhysics.position.y.toFixed(2)} `
 
-    // Render stars
+    // Render stars first (before composer)
     renderStars()
     
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio/2,2))
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio,2))
     // controls.update() // Disabled to avoid physics interference
-    renderer.render(scene,camera)
+    
+    // Use composer for pixelated rendering
+    composer.render()
+
     window.requestAnimationFrame(tick)
 };
 
